@@ -35,7 +35,7 @@ func main() {
 	c.Start()
 	fmt.Printf("🚀 服务启动成功！当前 Cron 表达式: [%s]\n", cfg.Cron)
 	fmt.Printf("当前时间: [%s]\n", time.Now())
-	fmt.Printf("压缩: [%v]  并发数: [%d]\n", cfg.Gzip, cfg.Thread)
+	fmt.Printf("Dump 命令: [%s]  压缩: [%v]  并发数: [%d]\n", cfg.Command, cfg.Gzip, cfg.Thread)
 	fmt.Println(cfg.Des)
 	if cfg.Init {
 		fmt.Println("您已设置首次启动备份功能。")

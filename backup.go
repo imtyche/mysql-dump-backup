@@ -29,7 +29,7 @@ func Backup(cfg *Config) {
 	cleanOldBackups(cfg.BackupPath, cfg.Clear)
 }
 
-// backupWithDump 使用 mariadb-dump，支持并发 + 可选 gzip
+// backupWithDump 使用 mysqldump / mariadb-dump，支持并发 + 可选 gzip
 func backupWithDump(cfg *Config, targetPath string) {
 	sem := make(chan struct{}, cfg.Thread)
 	var wg sync.WaitGroup
@@ -55,12 +55,25 @@ func backupDatabase(cfg *Config, dbName string, targetPath string) {
 	fileName := fmt.Sprintf("%s_%s%s", dbName, timestamp, ext)
 	filePath := filepath.Join(targetPath, fileName)
 
+	// 基础连接参数
 	args := []string{
 		"-h", cfg.MySQL.Host,
 		"-P", fmt.Sprintf("%d", cfg.MySQL.Port),
 		"-u", cfg.MySQL.User,
 		fmt.Sprintf("-p%s", cfg.MySQL.Password),
-		"--ssl=0",
+	}
+
+	// SSL 禁用参数兼容处理：
+	// - mysqldump (MySQL 5.7.11+ / 8.0) 使用 --ssl-mode=DISABLED
+	// - mariadb-dump / 旧版 使用 --ssl=0
+	cmdName := filepath.Base(cfg.Command)
+	if cmdName == "mysqldump" {
+		args = append(args, "--ssl-mode=DISABLED")
+	} else {
+		args = append(args, "--ssl=0")
+	}
+
+	args = append(args,
 		"--single-transaction",
 		"--flush-privileges",
 		"--quick",
@@ -68,12 +81,11 @@ func backupDatabase(cfg *Config, dbName string, targetPath string) {
 		"--events",
 		"--skip-comments",  // 去掉 dump 文件中的注释
 		"--skip-dump-date", // 去掉文件头的 dump 日期注释
-		"--skip-set-charset",
 		dbName,
-	}
+	)
 
-	fmt.Printf("[%s] 开始备份数据库: %s (gzip=%v)\n",
-		time.Now().Format("15:04:05"), dbName, cfg.Gzip)
+	fmt.Printf("[%s] 开始备份数据库: %s (cmd=%s, gzip=%v)\n",
+		time.Now().Format("15:04:05"), dbName, cfg.Command, cfg.Gzip)
 
 	outFile, err := os.Create(filePath)
 	if err != nil {
@@ -82,7 +94,7 @@ func backupDatabase(cfg *Config, dbName string, targetPath string) {
 	}
 	defer outFile.Close()
 
-	cmd := exec.Command("mariadb-dump", args...)
+	cmd := exec.Command(cfg.Command, args...)
 	cmd.Stderr = os.Stderr
 
 	if cfg.Gzip {
@@ -96,7 +108,7 @@ func backupDatabase(cfg *Config, dbName string, targetPath string) {
 		}
 
 		if err := cmd.Start(); err != nil {
-			fmt.Println("启动 mariadb-dump 失败:", err)
+			fmt.Printf("启动 %s 失败: %v\n", cfg.Command, err)
 			return
 		}
 
