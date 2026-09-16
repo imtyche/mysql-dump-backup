@@ -13,4 +13,7 @@ mysql:
 des: "备份数据库每天凌晨2点执行..."
 #默认保留3天的备份文件，超过3天的备份文件将被自动删除
 clear: 3
-init: true
+init: true            #首次启动是否执行
+gzip: false            # 是否压缩
+thread: 2             # 并发/并行数
+
