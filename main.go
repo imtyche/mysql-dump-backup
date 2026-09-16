@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	_ "runtime"
 	"syscall"
 	"time"
 
@@ -36,15 +35,14 @@ func main() {
 	c.Start()
 	fmt.Printf("🚀 服务启动成功！当前 Cron 表达式: [%s]\n", cfg.Cron)
 	fmt.Printf("当前时间: [%s]\n", time.Now())
+	fmt.Printf("压缩: [%v]  并发数: [%d]\n", cfg.Gzip, cfg.Thread)
 	fmt.Println(cfg.Des)
-	if cfg.Init == true {
+	if cfg.Init {
 		fmt.Println("您已设置首次启动备份功能。")
 		Backup(cfg)
 	}
 	// 3. 设置信号监听以实现优雅关闭
-	// 创建一个通道来接收系统信号
 	quit := make(chan os.Signal, 1)
-	// 监听中断 (Ctrl+C) 和 终止 (kill) 信号
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	// 阻塞在这里，直到收到信号
@@ -54,7 +52,7 @@ func main() {
 
 	// 4. 停止 Cron 任务（这会等待当前正在运行的任务执行完毕）
 	ctx := c.Stop()
-	<-ctx.Done() // 等待停止确认
+	<-ctx.Done()
 
 	fmt.Println("✅ 服务已安全关闭。")
 }

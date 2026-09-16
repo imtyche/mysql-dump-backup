@@ -151,6 +151,7 @@ GOOS=darwin GOARCH=amd64 go build -o mysql-dump-backup-macos
 
 # Windows
 GOOS=windows GOARCH=amd64 go build -o mysql-dump-backup.exe
+go build -ldflags "-s -w" -o mysql-dump-backup.exe .
 ```
 
 ## 🐛 Troubleshooting
@@ -192,3 +193,13 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ---
 
 **Support:** If you have any questions or issues, please open an [issue](https://github.com/wayhelper/mysql-dump-backup/issues) on GitHub.
+
+## reback
+# 全量备份
+xtrabackup --backup --target-dir=/backup/full
+
+# 准备（应用 redo log）
+xtrabackup --prepare --target-dir=/backup/full
+
+# 恢复（需先停止 MySQL 并清空数据目录）
+xtrabackup --copy-back --target-dir=/backup/full

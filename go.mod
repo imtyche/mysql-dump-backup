@@ -1,4 +1,4 @@
-module mysql-dump-backup
+module mysql-backup
 
 go 1.21
 

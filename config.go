@@ -14,6 +14,8 @@ type Config struct {
 	Des        string     `yaml:"des"`
 	Clear      int        `yaml:"clear"`
 	Init       bool       `yaml:"init"`
+	Gzip       bool       `yaml:"gzip"`   // whether to compress backup
+	Thread     int        `yaml:"thread"` // concurrency level
 }
 
 type Database struct {
@@ -37,5 +39,14 @@ func LoadConfig(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+
+	// defaults
+	if cfg.Thread <= 0 {
+		cfg.Thread = 1
+	}
+	if cfg.Clear <= 0 {
+		cfg.Clear = 7
+	}
+
 	return &cfg, nil
 }

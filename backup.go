@@ -1,10 +1,13 @@
 package main
 
 import (
+	"compress/gzip"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -19,18 +22,37 @@ func Backup(cfg *Config) {
 		return
 	}
 
-	// 2. 执行备份
-	for _, db := range cfg.Databases {
-		backupDatabase(cfg, db.Name, targetPath)
-	}
+	// 2. 执行备份（并发）
+	backupWithDump(cfg, targetPath)
 
 	// 3. 清理指定天数前的旧备份
 	cleanOldBackups(cfg.BackupPath, cfg.Clear)
 }
 
+// backupWithDump 使用 mariadb-dump，支持并发 + 可选 gzip
+func backupWithDump(cfg *Config, targetPath string) {
+	sem := make(chan struct{}, cfg.Thread)
+	var wg sync.WaitGroup
+
+	for _, db := range cfg.Databases {
+		wg.Add(1)
+		go func(dbName string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			backupDatabase(cfg, dbName, targetPath)
+		}(db.Name)
+	}
+	wg.Wait()
+}
+
 func backupDatabase(cfg *Config, dbName string, targetPath string) {
-	timestamp := time.Now().Format("150405") // 文件夹已按日期分类，文件名只需保留时间戳
-	fileName := fmt.Sprintf("%s_%s.sql", dbName, timestamp)
+	timestamp := time.Now().Format("150405")
+	ext := ".sql"
+	if cfg.Gzip {
+		ext = ".sql.gz"
+	}
+	fileName := fmt.Sprintf("%s_%s%s", dbName, timestamp, ext)
 	filePath := filepath.Join(targetPath, fileName)
 
 	args := []string{
@@ -44,10 +66,14 @@ func backupDatabase(cfg *Config, dbName string, targetPath string) {
 		"--quick",
 		"--routines",
 		"--events",
+		"--skip-comments",  // 去掉 dump 文件中的注释
+		"--skip-dump-date", // 去掉文件头的 dump 日期注释
+		"--skip-set-charset",
 		dbName,
 	}
 
-	cmd := exec.Command("mariadb-dump", args...)
+	fmt.Printf("[%s] 开始备份数据库: %s (gzip=%v)\n",
+		time.Now().Format("15:04:05"), dbName, cfg.Gzip)
 
 	outFile, err := os.Create(filePath)
 	if err != nil {
@@ -56,15 +82,50 @@ func backupDatabase(cfg *Config, dbName string, targetPath string) {
 	}
 	defer outFile.Close()
 
-	cmd.Stdout = outFile
+	cmd := exec.Command("mariadb-dump", args...)
 	cmd.Stderr = os.Stderr
 
-	fmt.Printf("[%s] 开始备份数据库: %s\n", time.Now().Format("15:04:05"), dbName)
-	if err := cmd.Run(); err != nil {
-		fmt.Println("备份失败:", dbName, err)
-		return
+	if cfg.Gzip {
+		// 使用纯 Go compress/gzip，不依赖系统 gzip 命令
+		gzWriter := gzip.NewWriter(outFile)
+
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			fmt.Println("创建 stdout pipe 失败:", err)
+			return
+		}
+
+		if err := cmd.Start(); err != nil {
+			fmt.Println("启动 mariadb-dump 失败:", err)
+			return
+		}
+
+		// 把 dump 输出流式写入 gzip
+		_, copyErr := io.Copy(gzWriter, stdout)
+		waitErr := cmd.Wait()
+		closeErr := gzWriter.Close() // 必须 Close 才能写出完整 gzip footer
+
+		if copyErr != nil {
+			fmt.Println("写入压缩数据失败:", dbName, copyErr)
+			return
+		}
+		if waitErr != nil {
+			fmt.Println("备份失败:", dbName, waitErr)
+			return
+		}
+		if closeErr != nil {
+			fmt.Println("关闭 gzip 失败:", dbName, closeErr)
+			return
+		}
+	} else {
+		cmd.Stdout = outFile
+		if err := cmd.Run(); err != nil {
+			fmt.Println("备份失败:", dbName, err)
+			return
+		}
 	}
-	fmt.Printf("[%s] 备份数据库成功...: %s\n", time.Now().Format("15:04:05"), filePath)
+
+	fmt.Printf("[%s] 备份数据库成功: %s\n", time.Now().Format("15:04:05"), filePath)
 }
 
 // cleanOldBackups 用于删除指定目录下超过指定天数的文件或目录(根据mod时间而不是文件夹名字)
